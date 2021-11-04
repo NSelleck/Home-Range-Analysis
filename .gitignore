@@ -3,12 +3,14 @@
 .RData
 .Ruserdata
 *.Renviron
-*.Rproj
 *.R
 *.gif
 *.png
 OPHA1.csv
 OPHA2.csv
+LOWA1.csv
+LOWA2.csv
+LOWA3.csv
 Ex_11.nb.html
 *_Area.csv
 previous_index.html
