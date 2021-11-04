@@ -1,0 +1,212 @@
+---
+title: Home Range Analysis Assignment <br><small>Advanced Data Analytics</small></br>
+author: Nate Selleck
+output:
+  html_document: 
+    df_print: paged
+    rows.print: 10
+    theme: cosmo
+    highlight: breezedark
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document: default
+  html_notebook:
+    df_print: paged
+    rows.print: 10
+    theme: cosmo
+    highlight: breezedark
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+editor_options:
+  chunk_output_type: inline
+  mode: gfm
+---
+
+```{=html}
+<style type="text/css">
+
+h1.title {
+  font-size: 40px;
+  font-family: "Times New Roman", Times, serif;
+  color: Black;
+  text-align: center;
+}
+
+h4.author { /* Header 4 - and the author and data headers use this too  */
+  font-size: 25px;
+  font-family: "Times New Roman", Times, serif;
+  font-weight: bold;
+  color: #D02349;
+  text-align: center;
+}
+
+body {
+  font-family: Helvetica;
+  font-size: 12pt;
+}
+
+.zoom {
+  transform-origin: 40% 50% 0;
+  transition: transform .2s;
+  margin: 0 auto;
+}
+.zoom img{
+	width:auto;
+	height:auto;	
+}
+.zoom:hover {
+  transform: scale(2);
+}
+
+th, td {padding: 5px;}
+
+</style>
+```
+
+
+<body style = "background-color:#b1d3aa">
+
+
+
+```{r Packages, echo=TRUE, message=FALSE, warning=FALSE}
+pacman::p_load("adehabitatHR","data.table","ggfortify","OpenStreetMap","grid","move","moveVis","OpenStreetMap","pbapply","maptools","rgdal","plotly","sp","tidyverse","viridis")
+
+```
+
+
+# Import Data Set
+
+This is the same data set used for the Basic Mapping assignment. These GPS points were collected for three Louisiana Waterthrush territories at Cheatham Wildlife Management Area in Cheatham Co, TN. For the purpose of getting a later line of code to work, I changed the ID's for each bird to LOWA1-LOWA3. 
+```{r data, echo=TRUE, message=FALSE, warning=FALSE}
+data <- read.csv("./Data/lowa_location_data.csv")
+```
+
+```{r structure, echo=TRUE, message=FALSE, warning=FALSE}
+head(data)
+```
+# QAQC Plot
+
+```{r plotly, echo=TRUE, fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+qaqc_plot <- ggplot() + geom_point(data=data, 
+                                   aes(Easting,Northing,
+                                       color=ï..id)) +
+                        labs(x="Easting", y="Northing") +
+                        guides(color=guide_legend("Identifier"))
+
+ggplotly(qaqc_plot)
+```
+
+ 
+
+```{r lapply function, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+lapply(split(data, data$ï..id), 
+       function(x)write.csv(x, file = paste(x$ï..id[1],".csv", sep = ""), row.names = FALSE))
+```
+
+
+
+```{r list, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+files <- list.files(path = ".", pattern = "[LOWA]+[0-9]+", full.names = TRUE)
+```
+
+
+
+```{r imagery, message=FALSE, warning=FALSE, echo=TRUE, fig.height=6, fig.width=8}
+utm_points <- cbind(data$Easting, data$Northing)
+utm_locations <- SpatialPoints(utm_points, 
+                 proj4string=CRS("+proj=utm +zone=16 +datum=WGS84"))
+proj_lat.lon <- as.data.frame(spTransform(
+                utm_locations, CRS("+proj=longlat +datum=WGS84")))
+colnames(proj_lat.lon) <- c("x","y")
+raster <- openmap(c(max(proj_lat.lon$y)+0.01, min(proj_lat.lon$x)-0.01), 
+                  c(min(proj_lat.lon$y)-0.01, max(proj_lat.lon$x)+0.01), 
+                  type = "bing")
+raster_utm <- openproj(raster, 
+              projection = "+proj=utm +zone=16 +datum=WGS84 +units=m +no_defs")
+```
+
+
+$~$
+
+# Plot the Data
+
+```{r imagery plot, message=FALSE, warning=FALSE, echo=TRUE, fig.height=6, fig.width=6}
+autoplot.OpenStreetMap(raster_utm, expand = TRUE) + theme_bw() +
+  theme(legend.position="bottom") +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  geom_point(data=data, aes(Easting,Northing,
+             color=ï..id), size = 3, alpha = 0.8) +
+  theme(axis.title = element_text(face="bold")) + labs(x="Easting",
+        y="Northing") + guides(color=guide_legend("Identifier"))
+```
+
+$~$
+
+# Minimum Convex Plygon
+
+```{r MCP plot, message=FALSE, warning=FALSE, echo=TRUE, fig.height=6, fig.width=6}
+mcp_raster <- function(filename){
+  data <- read.csv(file = filename)
+  x <- as.data.frame(data$Easting)
+  y <- as.data.frame(data$Northing)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=utm +zone=16 +datum=WGS84 +units=m +no_defs"))
+  xy <- SpatialPoints(data.proj@coords)
+  mcp.out <- mcp(xy, percent=100, unout="ha")
+  mcp.points <- cbind((data.frame(xy)),data$ï..id)
+  colnames(mcp.points) <- c("x","y", "identifier")
+  mcp.poly <- fortify(mcp.out, region = "id")
+  units <- grid.text(paste(round(mcp.out@data$area,2),"ha"), x=0.85,  y=0.95,
+                     gp=gpar(fontface=4, col="white", cex=0.9), draw = FALSE)
+  mcp.plot <- autoplot.OpenStreetMap(raster_utm, expand = TRUE) + theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=mcp.poly, aes(x=mcp.poly$long, y=mcp.poly$lat), alpha = 0.5, fill = "red") +
+    geom_point(data=mcp.points, aes(x=x, y=y)) + 
+    labs(x="Easting (m)", y="Northing (m)", title=mcp.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold", hjust = 0.5)) + 
+    annotation_custom(units)
+  mcp.plot
+}
+
+pblapply(files, mcp_raster)
+```
+
+$~$
+
+# Kernel Density Estimate
+
+```{r KDE plot, message=FALSE, warning=FALSE, echo=TRUE, fig.height=6, fig.width=6}
+kde_raster <- function(filename){
+  data <- read.csv(file = filename)
+  x <- as.data.frame(data$Easting)
+  y <- as.data.frame(data$Northing)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=utm +zone=16 +datum=WGS84 +units=m +no_defs"))
+  xy <- SpatialPoints(data.proj@coords)
+  kde<-kernelUD(xy, h="href", kern="bivnorm", grid=100)
+  ver <- getverticeshr(kde, 95)
+  kde.points <- cbind((data.frame(data.proj@coords)),data$ï..id)
+  colnames(kde.points) <- c("x","y","identifier")
+  kde.poly <- fortify(ver, region = "id")
+  units <- grid.text(paste(round(ver$area,2)," ha"), x=0.85,  y=0.95,
+                     gp=gpar(fontface=4, col="white", cex=0.9), draw = FALSE)
+  kde.plot <- autoplot.OpenStreetMap(raster_utm, expand = TRUE) + theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=kde.poly, aes(x=kde.poly$long, y=kde.poly$lat), alpha = 0.5, fill = "red") +
+    geom_point(data=kde.points, aes(x=x, y=y)) +
+    labs(x="Easting (m)", y="Northing (m)", title=kde.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold", hjust = 0.5)) + 
+    annotation_custom(units)
+  kde.plot
+}
+
+pblapply(files, kde_raster)
+```
+
+The three KDE maps have large buffers and aren't very accurate, mostly due to the low number of data points to work from. 
